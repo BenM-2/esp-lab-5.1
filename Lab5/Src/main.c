@@ -1,6 +1,6 @@
 /**
   ******************************************************************************
-  * @File    Src/main.c 
+  * @file    Src/main.c 
   * @author  Craig
   * @brief   Main program body
   ******************************************************************************
@@ -8,10 +8,11 @@
   * @brief  Main program
   * @param  None
   * @retval None
-  * a simple interrupt driven button program.  The ISR toggles the LED
+  * a simple timer generating an interrupt which flashes an LED
   */
 
 #include "main.h"
+#include "stm32l4xx_hal_tim.h"
 #include <stdio.h>
 
 //  pins and clock for the LED
@@ -20,13 +21,6 @@
 #define LED2_GPIO_PORT                   GPIOB
 #define LED2_GPIO_CLK_ENABLE()           __HAL_RCC_GPIOB_CLK_ENABLE()
 #define LED2_GPIO_CLK_DISABLE()          __HAL_RCC_GPIOB_CLK_DISABLE()
-
-//declaration for the GPIO pins for the wakeup Button
-
-#define BLUE_BUTTON_PIN                   GPIO_PIN_13
-#define BLUE_BUTTON_GPIO_PORT             GPIOC
-#define BLUE_BUTTON_GPIO_CLK_ENABLE()     __HAL_RCC_GPIOC_CLK_ENABLE()
-#define BLUE_BUTTON_GPIO_CLK_DISABLE()    __HAL_RCC_GPIOC_CLK_DISABLE()
 
 // pins and clocks for USART
 
@@ -47,8 +41,7 @@
 #define DISCOVERY_COM1_RX_AF                    GPIO_AF7_USART1
 
 UART_HandleTypeDef hDiscoUart;
-EXTI_HandleTypeDef hexti;
-EXTI_ConfigTypeDef pEXTiConfig;
+TIM_HandleTypeDef        TimHandle;
 
 /* Private function prototypes -----------------------------------------------*/
 static void SystemClock_Config(void);
@@ -56,7 +49,9 @@ void LED2_Init(void);
 void BSP_COM_Init( UART_HandleTypeDef *);
 void LED2_Toggle(void);
 int __io_putchar(int);
-HAL_StatusTypeDef Blue_PB_EXT_Init(void);
+void TIM2_IRQHandler(void);
+HAL_StatusTypeDef  configure_timer2_interrupt(void);
+
 
 int main(void)
 {
@@ -92,14 +87,16 @@ int main(void)
 
   /* Configure the User LED */
   LED2_Init();
-  printf("Welcome to button interrupts !\n");
-  if ( Blue_PB_EXT_Init() == HAL_ERROR )
-    printf("set up button interrupt failed\n");
-  else
+  printf("Welcome to timer interrupts !\n");
+  if ( configure_timer2_interrupt() ==  HAL_OK)
+    {
       for ( ; ;)
 	{
+
 	}
-  printf("Bye Bye \n");
+    } else
+    printf("timer config error \n");
+  
 }
 
 static void SystemClock_Config(void)
@@ -191,53 +188,45 @@ void BSP_COM_Init(UART_HandleTypeDef *huart)
   huart->Instance = DISCOVERY_COM1;
   HAL_UART_Init(huart);
 }
-/* set up blue button ISR */
-HAL_StatusTypeDef Blue_PB_EXT_Init()
+
+HAL_StatusTypeDef  configure_timer2_interrupt()
 {
-  GPIO_InitTypeDef gpio_init_structure;
-  
-  /* Enable the BUTTON clock */
-  BLUE_BUTTON_GPIO_CLK_ENABLE();
-  __HAL_RCC_SYSCFG_CLK_ENABLE();
- 
-  /* Configure Button pin as input */
-  gpio_init_structure.Pin = BLUE_BUTTON_PIN;
-  gpio_init_structure.Mode = GPIO_MODE_INPUT;
-  gpio_init_structure.Pull = GPIO_PULLUP;
-  gpio_init_structure.Speed = GPIO_SPEED_FREQ_HIGH;
-  HAL_GPIO_Init(BLUE_BUTTON_GPIO_PORT, &gpio_init_structure);
-  
-  hexti.Line = EXTI_LINE_13;
+  //NVIC_InitTypeDef nvicStructure;
 
-  pEXTiConfig.Line = EXTI_LINE_13;
-  pEXTiConfig.Mode = EXTI_MODE_INTERRUPT;
-  pEXTiConfig.Trigger = EXTI_TRIGGER_RISING;
-  pEXTiConfig.GPIOSel = EXTI_GPIOC;
-  /* Configure interrupts for button */ 
-  if ( HAL_EXTI_SetConfigLine(&hexti, &pEXTiConfig) == HAL_ERROR)
-    return HAL_ERROR;
-  //set ISR priority
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0U);
-  //enable IRQ
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+  /* Configure the TIM2 IRQ priority TickPriority=0 */
+  HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0U);
+  /* Enable the TIM2 global Interrupt */
+  HAL_NVIC_EnableIRQ(TIM2_IRQn);
+  /* Enable TIM2 clock */
+  __HAL_RCC_TIM2_CLK_ENABLE();
 
-  return HAL_OK;
+  /* Initialize TIM2 */
+  TimHandle.Instance = TIM2;
+  
+  TimHandle.Init.Period = 1000000U;
+  TimHandle.Init.Prescaler = 100;
+  TimHandle.Init.ClockDivision = 0;
+  TimHandle.Init.CounterMode = TIM_COUNTERMODE_UP;
+  TimHandle.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if(HAL_TIM_Base_Init(&TimHandle) == HAL_OK)
+  {
+    /* Start the TIM time Base generation in interrupt mode */
+    return HAL_TIM_Base_Start_IT(&TimHandle);
+  }
+  /* Return function status */
+  return HAL_ERROR;
 }
-
-
-//EXTI15_10_IRQHandler ISR
-void  EXTI15_10_IRQHandler() 
-
-{ 
-    LED2_Toggle();
-    //clean up 
-    HAL_EXTI_IRQHandler(&hexti);
-
-} 
 
 void LED2_Toggle(void)
 {
   HAL_GPIO_TogglePin(LED2_GPIO_PORT, LED2_PIN);
+}
+
+void TIM2_IRQHandler()
+{
+  LED2_Toggle();
+  //__io_putchar('i'); debug
+  HAL_TIM_IRQHandler(&TimHandle);
 }
 
 int __io_putchar(int ch)
